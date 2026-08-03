@@ -151,7 +151,7 @@ function SectorChart({ sector }: { sector: string }) {
         <ComposedChart 
           data={chartData.data} 
           margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
-          onClick={(e) => e && e.stopPropagation && e.stopPropagation()}
+          onClick={() => {}}
         >
           <defs>
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
