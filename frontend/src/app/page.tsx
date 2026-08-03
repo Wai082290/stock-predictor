@@ -184,7 +184,7 @@ function SectorChart({ sector }: { sector: string }) {
               };
               return [Number(value).toFixed(2), labels[String(name)] || String(name)];
             }}
-            labelFormatter={(label) => new Date(label).toLocaleDateString('zh-HK')}
+            labelFormatter={(label: any) => new Date(String(label)).toLocaleDateString('zh-HK')}
           />
           
           {/* 預測區間陰影 */}
