@@ -1,0 +1,17 @@
+fastapi
+uvicorn[standard]
+aiohttp
+beautifulsoup4
+feedparser
+transformers
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+sentencepiece
+scikit-learn
+xgboost
+pandas
+numpy
+yfinance
+python-dotenv
+joblib
+pydantic

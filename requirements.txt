@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+aiohttp
+beautifulsoup4
+feedparser
+transformers
+torch
+sentencepiece
+scikit-learn
+xgboost
+pandas
+numpy
+yfinance
+python-dotenv
+joblib
+pydantic
