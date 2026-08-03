@@ -174,15 +174,15 @@ function SectorChart({ sector }: { sector: string }) {
               padding: '8px',
             }}
             labelStyle={{ color: '#94a3b8', marginBottom: '4px' }}
-            formatter={(value: any, name: string) => {
-              if (value === null || value === undefined) return null;
+           formatter={(value: any, name: any) => {
+              if (value === null || value === undefined) return ['', ''];
               const labels: { [key: string]: string } = {
                 value: '歷史指數',
                 forecast: '預測值',
                 upper: '預測上限',
                 lower: '預測下限',
               };
-              return [Number(value).toFixed(2), labels[name] || name];
+              return [Number(value).toFixed(2), labels[String(name)] || String(name)];
             }}
             labelFormatter={(label) => new Date(label).toLocaleDateString('zh-HK')}
           />
