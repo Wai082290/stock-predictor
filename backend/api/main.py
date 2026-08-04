@@ -81,6 +81,250 @@ async def root():
         }
     }
 
+# ===== 個股相關 API =====
+
+@app.get("/stocks/search")
+async def search_stocks(q: str = Query(..., min_length=1)):
+    """搜尋股票(根據代號或名稱)"""
+    try:
+        import yfinance as yf
+        
+        # 常見股票列表(方便搜尋)
+        common_stocks = {
+            # 美股科技
+            "AAPL": "Apple Inc.",
+            "MSFT": "Microsoft Corporation",
+            "GOOGL": "Alphabet Inc. (Google)",
+            "AMZN": "Amazon.com Inc.",
+            "META": "Meta Platforms Inc.",
+            "NVDA": "NVIDIA Corporation",
+            "TSLA": "Tesla Inc.",
+            "AMD": "Advanced Micro Devices",
+            "INTC": "Intel Corporation",
+            "NFLX": "Netflix Inc.",
+            "ORCL": "Oracle Corporation",
+            "CRM": "Salesforce Inc.",
+            "ADBE": "Adobe Inc.",
+            "PYPL": "PayPal Holdings",
+            "UBER": "Uber Technologies",
+            # 美股金融
+            "JPM": "JPMorgan Chase",
+            "BAC": "Bank of America",
+            "GS": "Goldman Sachs",
+            "V": "Visa Inc.",
+            "MA": "Mastercard Inc.",
+            "WFC": "Wells Fargo",
+            # 美股其他
+            "JNJ": "Johnson & Johnson",
+            "WMT": "Walmart Inc.",
+            "PG": "Procter & Gamble",
+            "KO": "Coca-Cola",
+            "DIS": "Walt Disney",
+            "NKE": "Nike Inc.",
+            "MCD": "McDonald's",
+            "PFE": "Pfizer Inc.",
+            "XOM": "Exxon Mobil",
+            "CVX": "Chevron",
+            "BA": "Boeing Company",
+            "GE": "General Electric",
+            # 半導體
+            "TSM": "Taiwan Semiconductor",
+            "ASML": "ASML Holding",
+            "QCOM": "Qualcomm",
+            "MU": "Micron Technology",
+            "AVGO": "Broadcom Inc.",
+            # 電動車
+            "NIO": "NIO Inc.",
+            "RIVN": "Rivian Automotive",
+            "LCID": "Lucid Group",
+            "F": "Ford Motor",
+            "GM": "General Motors",
+            # 港股
+            "0700.HK": "騰訊控股",
+            "9988.HK": "阿里巴巴",
+            "3690.HK": "美團",
+            "1810.HK": "小米集團",
+            "0005.HK": "匯豐控股",
+            "0388.HK": "香港交易所",
+            "0939.HK": "建設銀行",
+            "1299.HK": "友邦保險",
+            "2318.HK": "中國平安",
+            "0883.HK": "中國海洋石油",
+            # ETF
+            "SPY": "SPDR S&P 500 ETF",
+            "QQQ": "Invesco QQQ (Nasdaq 100)",
+            "VOO": "Vanguard S&P 500",
+            "ARKK": "ARK Innovation ETF",
+        }
+        
+        q_upper = q.upper().strip()
+        results = []
+        
+        # 搜尋匹配的股票
+        for ticker, name in common_stocks.items():
+            if (q_upper in ticker.upper() or 
+                q.lower() in name.lower()):
+                results.append({
+                    "ticker": ticker,
+                    "name": name,
+                })
+                if len(results) >= 10:  # 最多返回 10 個
+                    break
+        
+        # 如果沒有匹配到常見股票,直接返回輸入的代號
+        if not results:
+            results.append({
+                "ticker": q_upper,
+                "name": q_upper,
+            })
+        
+        return {"query": q, "results": results}
+        
+    except Exception as e:
+        logger.error(f"搜尋股票失敗: {e}")
+        return {"query": q, "results": [], "error": str(e)}
+
+
+@app.get("/stocks/{ticker}")
+async def get_stock_detail(ticker: str):
+    """獲取單一股票的詳細資訊"""
+    try:
+        import yfinance as yf
+        
+        ticker_upper = ticker.upper().strip()
+        stock = yf.Ticker(ticker_upper)
+        
+        # 獲取基本資訊
+        info = stock.info
+        
+        # 獲取歷史數據(用於計算變化)
+        hist = stock.history(period="5d")
+        
+        if hist.empty:
+            return {
+                "ticker": ticker_upper,
+                "error": "找不到此股票代號",
+            }
+        
+        # 計算當前價格和變化
+        current_price = float(hist["Close"].iloc[-1])
+        prev_close = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else current_price
+        change = current_price - prev_close
+        change_pct = (change / prev_close * 100) if prev_close > 0 else 0
+        
+        # 今日數據
+        today = hist.iloc[-1]
+        
+        return {
+            "ticker": ticker_upper,
+            "name": info.get("longName") or info.get("shortName") or ticker_upper,
+            "current_price": round(current_price, 2),
+            "change": round(change, 2),
+            "change_pct": round(change_pct, 2),
+            "open": round(float(today["Open"]), 2),
+            "high": round(float(today["High"]), 2),
+            "low": round(float(today["Low"]), 2),
+            "volume": int(today["Volume"]),
+            "volume_formatted": format_volume(int(today["Volume"])),
+            "prev_close": round(prev_close, 2),
+            "currency": info.get("currency", "USD"),
+            "market_cap": info.get("marketCap"),
+            "market_cap_formatted": format_market_cap(info.get("marketCap")),
+            "pe_ratio": round(info.get("trailingPE", 0), 2) if info.get("trailingPE") else None,
+            "dividend_yield": round(info.get("dividendYield", 0) * 100, 2) if info.get("dividendYield") else None,
+            "week_52_high": info.get("fiftyTwoWeekHigh"),
+            "week_52_low": info.get("fiftyTwoWeekLow"),
+            "sector": info.get("sector", "N/A"),
+            "industry": info.get("industry", "N/A"),
+            "exchange": info.get("exchange", "N/A"),
+            "website": info.get("website", ""),
+            "description": (info.get("longBusinessSummary", "")[:300] + "...") if info.get("longBusinessSummary") else "",
+        }
+        
+    except Exception as e:
+        logger.error(f"獲取股票 {ticker} 詳情失敗: {e}")
+        return {"ticker": ticker, "error": str(e)}
+
+
+@app.get("/stocks/{ticker}/chart")
+async def get_stock_chart(ticker: str, days: int = 30):
+    """獲取單一股票的走勢圖數據"""
+    try:
+        import yfinance as yf
+        from datetime import datetime, timedelta
+        
+        ticker_upper = ticker.upper().strip()
+        stock = yf.Ticker(ticker_upper)
+        
+        # 根據天數決定 period
+        if days <= 7:
+            period = "1mo"
+        elif days <= 30:
+            period = "3mo"
+        elif days <= 90:
+            period = "6mo"
+        else:
+            period = "1y"
+        
+        hist = stock.history(period=period)
+        
+        if hist.empty:
+            return {"ticker": ticker_upper, "data": [], "error": "no data"}
+        
+        # 只取最近 N 天
+        hist = hist.tail(days)
+        
+        chart_data = []
+        for date, row in hist.iterrows():
+            chart_data.append({
+                "date": date.strftime("%Y-%m-%d"),
+                "value": round(float(row["Close"]), 2),
+                "volume": int(row["Volume"]),
+                "high": round(float(row["High"]), 2),
+                "low": round(float(row["Low"]), 2),
+                "open": round(float(row["Open"]), 2),
+            })
+        
+        # 計算總回報
+        if len(chart_data) >= 2:
+            total_return = ((chart_data[-1]["value"] / chart_data[0]["value"]) - 1) * 100
+        else:
+            total_return = 0
+        
+        return {
+            "ticker": ticker_upper,
+            "data": chart_data,
+            "days": len(chart_data),
+            "total_return_pct": round(total_return, 2),
+        }
+        
+    except Exception as e:
+        logger.error(f"獲取 {ticker} 走勢失敗: {e}")
+        return {"ticker": ticker, "data": [], "error": str(e)}
+
+
+def format_volume(volume: int) -> str:
+    """格式化成交量 (1234567 -> 1.23M)"""
+    if volume >= 1_000_000_000:
+        return f"{volume / 1_000_000_000:.2f}B"
+    elif volume >= 1_000_000:
+        return f"{volume / 1_000_000:.2f}M"
+    elif volume >= 1_000:
+        return f"{volume / 1_000:.2f}K"
+    return str(volume)
+
+
+def format_market_cap(cap) -> str:
+    """格式化市值"""
+    if not cap:
+        return "N/A"
+    if cap >= 1_000_000_000_000:
+        return f"${cap / 1_000_000_000_000:.2f}T"
+    elif cap >= 1_000_000_000:
+        return f"${cap / 1_000_000_000:.2f}B"
+    elif cap >= 1_000_000:
+        return f"${cap / 1_000_000:.2f}M"
+    return f"${cap:,}"
 
 @app.get("/sectors")
 async def get_sectors():
