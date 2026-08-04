@@ -81,6 +81,144 @@ async def root():
         }
     }
 
+
+# ===== 翻譯 API =====
+
+# 翻譯快取(避免重複翻譯同樣的文字)
+translation_cache: Dict[str, str] = {}
+
+
+@app.post("/translate")
+async def translate_text(request: dict):
+    """
+    翻譯文字 (使用免費的 MyMemory API)
+    
+    Body:
+        text: 要翻譯的文字
+        target_lang: 目標語言 (預設 zh-TW)
+    """
+    text = request.get("text", "").strip()
+    target_lang = request.get("target_lang", "zh-TW")
+    
+    if not text:
+        return {"translated": "", "original": text}
+    
+    # 檢查快取
+    cache_key = f"{text}_{target_lang}"
+    if cache_key in translation_cache:
+        return {
+            "translated": translation_cache[cache_key],
+            "original": text,
+            "cached": True,
+        }
+    
+    try:
+        import aiohttp
+        
+        # 使用免費的 MyMemory API
+        # 語言代碼: zh-TW (繁中), zh-CN (簡中), ja (日文), ko (韓文)
+        lang_pair = f"en|{target_lang}"
+        
+        url = "https://api.mymemory.translated.net/get"
+        params = {
+            "q": text[:500],  # 限制字數避免超過 API 限制
+            "langpair": lang_pair,
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    translated = data.get("responseData", {}).get("translatedText", text)
+                    
+                    # 存入快取
+                    translation_cache[cache_key] = translated
+                    
+                    # 限制快取大小(避免無限增長)
+                    if len(translation_cache) > 1000:
+                        # 移除最舊的 200 個
+                        keys_to_remove = list(translation_cache.keys())[:200]
+                        for k in keys_to_remove:
+                            del translation_cache[k]
+                    
+                    return {
+                        "translated": translated,
+                        "original": text,
+                        "cached": False,
+                    }
+                else:
+                    return {"translated": text, "original": text, "error": f"API returned {resp.status}"}
+    
+    except Exception as e:
+        logger.error(f"翻譯失敗: {e}")
+        return {"translated": text, "original": text, "error": str(e)}
+
+
+@app.post("/translate/batch")
+async def translate_batch(request: dict):
+    """
+    批量翻譯多個文字
+    
+    Body:
+        texts: List of strings
+        target_lang: 目標語言
+    """
+    texts = request.get("texts", [])
+    target_lang = request.get("target_lang", "zh-TW")
+    
+    if not texts or not isinstance(texts, list):
+        return {"translations": []}
+    
+    import aiohttp
+    import asyncio
+    
+    async def translate_one(session, text):
+        # 檢查快取
+        cache_key = f"{text}_{target_lang}"
+        if cache_key in translation_cache:
+            return translation_cache[cache_key]
+        
+        try:
+            lang_pair = f"en|{target_lang}"
+            url = "https://api.mymemory.translated.net/get"
+            params = {"q": text[:500], "langpair": lang_pair}
+            
+            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    translated = data.get("responseData", {}).get("translatedText", text)
+                    translation_cache[cache_key] = translated
+                    return translated
+        except Exception as e:
+            logger.error(f"翻譯錯誤: {e}")
+        
+        return text
+    
+    async with aiohttp.ClientSession() as session:
+        # 並行翻譯(但限制並發數避免 rate limit)
+        semaphore = asyncio.Semaphore(3)  # 最多同時 3 個請求
+        
+        async def bounded_translate(text):
+            async with semaphore:
+                result = await translate_one(session, text)
+                await asyncio.sleep(0.3)  # 稍微延遲避免 rate limit
+                return result
+        
+        results = await asyncio.gather(
+            *[bounded_translate(text) for text in texts],
+            return_exceptions=True
+        )
+    
+    translations = []
+    for original, result in zip(texts, results):
+        if isinstance(result, Exception):
+            translations.append({"original": original, "translated": original, "error": str(result)})
+        else:
+            translations.append({"original": original, "translated": result})
+    
+    return {"translations": translations}
+
+
 # ===== 個股相關 API =====
 
 @app.get("/stocks/search")
@@ -244,6 +382,242 @@ async def get_stock_detail(ticker: str):
     except Exception as e:
         logger.error(f"獲取股票 {ticker} 詳情失敗: {e}")
         return {"ticker": ticker, "error": str(e)}
+
+
+# ===== 新功能 API =====
+
+@app.get("/market/fear-greed")
+async def get_fear_greed_index():
+    """計算恐懼貪婪指數 (基於預測結果)"""
+    if not state.cached_predictions:
+        return {"index": 50, "label": "中性", "color": "#facc15"}
+    
+    # 計算平均上升機率
+    up_probs = [p["up_probability"] for p in state.cached_predictions.values()]
+    avg_up = sum(up_probs) / len(up_probs) if up_probs else 0.5
+    
+    # 轉換為 0-100 指數
+    index = int(avg_up * 100)
+    
+    if index >= 75:
+        label = "極度貪婪"
+        color = "#22c55e"
+        emoji = "🤑"
+    elif index >= 55:
+        label = "貪婪"
+        color = "#84cc16"
+        emoji = "😊"
+    elif index >= 45:
+        label = "中性"
+        color = "#facc15"
+        emoji = "😐"
+    elif index >= 25:
+        label = "恐懼"
+        color = "#f97316"
+        emoji = "😰"
+    else:
+        label = "極度恐懼"
+        color = "#ef4444"
+        emoji = "😱"
+    
+    return {
+        "index": index,
+        "label": label,
+        "color": color,
+        "emoji": emoji,
+        "description": f"當前市場情緒: {label}",
+    }
+
+
+@app.get("/market/trending")
+async def get_trending_stocks():
+    """獲取熱門股票 (基於類別預測)"""
+    if not state.cached_predictions:
+        return {"stocks": []}
+    
+    trending = []
+    
+    # 從每個類別選出代表股票
+    for sector_key, pred in state.cached_predictions.items():
+        sector_info = SECTORS.get(sector_key, {})
+        tickers = sector_info.get("tickers", [])[:2]  # 每個類別取 2 隻
+        
+        for ticker in tickers:
+            try:
+                import yfinance as yf
+                stock = yf.Ticker(ticker)
+                hist = stock.history(period="2d")
+                
+                if not hist.empty and len(hist) >= 2:
+                    current = float(hist["Close"].iloc[-1])
+                    prev = float(hist["Close"].iloc[-2])
+                    change_pct = ((current - prev) / prev * 100) if prev > 0 else 0
+                    
+                    trending.append({
+                        "ticker": ticker,
+                        "sector": sector_info.get("name", sector_key),
+                        "price": round(current, 2),
+                        "change_pct": round(change_pct, 2),
+                        "prediction": pred["direction"],
+                        "up_probability": pred["up_probability"],
+                    })
+            except Exception as e:
+                logger.error(f"Failed to fetch trending {ticker}: {e}")
+    
+    # 按漲幅排序
+    trending.sort(key=lambda x: x["change_pct"], reverse=True)
+    
+    return {
+        "gainers": trending[:5],  # 前 5 名漲幅
+        "losers": trending[-5:][::-1],  # 前 5 名跌幅
+    }
+
+
+@app.get("/market/hours")
+async def get_market_hours():
+    """獲取全球主要市場狀態"""
+    from datetime import datetime, timezone, timedelta
+    
+    now_utc = datetime.now(timezone.utc)
+    
+    markets = [
+        {
+            "name": "🇺🇸 紐約",
+            "code": "NYSE",
+            "timezone": -5,  # EST
+            "open_hour": 9.5,   # 9:30 AM
+            "close_hour": 16,   # 4:00 PM
+            "flag": "🇺🇸",
+        },
+        {
+            "name": "🇭🇰 香港",
+            "code": "HKEX",
+            "timezone": 8,
+            "open_hour": 9.5,   # 9:30 AM
+            "close_hour": 16,   # 4:00 PM
+            "flag": "🇭🇰",
+        },
+        {
+            "name": "🇯🇵 東京",
+            "code": "TSE",
+            "timezone": 9,
+            "open_hour": 9,
+            "close_hour": 15,
+            "flag": "🇯🇵",
+        },
+        {
+            "name": "🇬🇧 倫敦",
+            "code": "LSE",
+            "timezone": 0,
+            "open_hour": 8,
+            "close_hour": 16.5,
+            "flag": "🇬🇧",
+        },
+    ]
+    
+    result = []
+    for market in markets:
+        local_time = now_utc + timedelta(hours=market["timezone"])
+        local_hour = local_time.hour + local_time.minute / 60
+        weekday = local_time.weekday()
+        
+        # 週末休市
+        is_weekend = weekday >= 5
+        is_open = (not is_weekend) and (market["open_hour"] <= local_hour < market["close_hour"])
+        
+        # 計算距離開/關市時間
+        if is_open:
+            hours_until_close = market["close_hour"] - local_hour
+            status = f"⏰ {int(hours_until_close)}小時 {int((hours_until_close % 1) * 60)}分鐘後收市"
+        else:
+            status = "🔴 休市中" if is_weekend else "⏱️ 未開市"
+        
+        result.append({
+            "name": market["name"],
+            "code": market["code"],
+            "local_time": local_time.strftime("%H:%M"),
+            "is_open": is_open,
+            "status": status,
+            "flag": market["flag"],
+        })
+    
+    return {"markets": result}
+
+
+@app.get("/exchange/rate")
+async def get_exchange_rate():
+    """獲取常用匯率"""
+    try:
+        import aiohttp
+        
+        # 使用免費 API
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://api.exchangerate-api.com/v4/latest/USD",
+                timeout=aiohttp.ClientTimeout(total=5)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    rates = data.get("rates", {})
+                    return {
+                        "base": "USD",
+                        "rates": {
+                            "HKD": rates.get("HKD", 7.8),
+                            "CNY": rates.get("CNY", 7.2),
+                            "EUR": rates.get("EUR", 0.92),
+                            "JPY": rates.get("JPY", 150),
+                            "GBP": rates.get("GBP", 0.79),
+                            "TWD": rates.get("TWD", 32),
+                        },
+                        "updated": data.get("date"),
+                    }
+    except Exception as e:
+        logger.error(f"Exchange rate error: {e}")
+    
+    # 預設值
+    return {
+        "base": "USD",
+        "rates": {"HKD": 7.8, "CNY": 7.2, "EUR": 0.92, "JPY": 150, "GBP": 0.79, "TWD": 32},
+    }
+
+
+@app.get("/stocks/{ticker}/compare/{ticker2}")
+async def compare_stocks(ticker: str, ticker2: str, days: int = 30):
+    """比較兩隻股票"""
+    try:
+        import yfinance as yf
+        from datetime import datetime, timedelta
+        
+        results = []
+        
+        for t in [ticker.upper(), ticker2.upper()]:
+            stock = yf.Ticker(t)
+            hist = stock.history(period="3mo").tail(days)
+            
+            if hist.empty:
+                continue
+            
+            # 標準化(第一天 = 100)
+            first_price = float(hist["Close"].iloc[0])
+            normalized = [(row.Index.strftime("%Y-%m-%d"), 
+                          round((float(row.Close) / first_price) * 100, 2))
+                         for row in hist.itertuples()]
+            
+            total_return = ((float(hist["Close"].iloc[-1]) / first_price) - 1) * 100
+            
+            results.append({
+                "ticker": t,
+                "data": [{"date": d, "value": v} for d, v in normalized],
+                "total_return_pct": round(total_return, 2),
+                "current_price": round(float(hist["Close"].iloc[-1]), 2),
+            })
+        
+        return {"comparison": results}
+        
+    except Exception as e:
+        logger.error(f"Compare stocks error: {e}")
+        return {"comparison": [], "error": str(e)}
+
 
 
 @app.get("/stocks/{ticker}/chart")
