@@ -707,8 +707,22 @@ export default function HomePage() {
   const predictions = dashboard?.predictions || [];
   const overview = dashboard?.market_overview;
 
-  return (
-    <div className="min-h-screen animated-gradient-bg text-white">
+    return (
+    <div className="min-h-screen text-white">
+      {/* ⭐ 影片背景 */}
+      <div className="video-background-wrapper">
+        <video
+          className="video-background"
+          autoPlay
+          loop
+          muted
+          playsInline
+        >
+          <source src="/background.mp4" type="video/mp4" />
+        </video>
+      </div>
+      <div className="video-overlay"></div>
+      
       <div className="fixed top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 z-50"></div>
       
       <header className="glass-strong border-b border-white/5 sticky top-1 z-40">

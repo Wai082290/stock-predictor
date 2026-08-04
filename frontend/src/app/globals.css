@@ -270,3 +270,57 @@ input:focus-visible {
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   transition-duration: 200ms;
 }
+
+
+/* ===== 影片背景 ===== */
+.video-background-wrapper {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  z-index: -2;
+  pointer-events: none;
+}
+
+.video-background {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 100%;
+  min-height: 100%;
+  width: auto;
+  height: auto;
+  opacity: 0.5;  /* 30% 透明度 */
+  object-fit: cover;
+}
+
+/* 影片上方的黑色遮罩(增加內容可讀性) */
+.video-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: linear-gradient(
+    180deg,
+    rgba(3, 7, 18, 0.6) 0%,
+    rgba(3, 7, 18, 0.4) 50%,
+    rgba(3, 7, 18, 0.7) 100%
+  );
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* 讓所有內容浮在影片上 */
+body {
+  position: relative;
+}
+
+/* 主要內容區塊需要相對定位 */
+main, header, footer {
+  position: relative;
+  z-index: 1;
+}
